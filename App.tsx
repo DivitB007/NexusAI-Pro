@@ -123,6 +123,41 @@ export const App: React.FC = () => {
     });
   };
 
+  const handleAddCredits = (amount: number) => {
+    setCredits(prev => {
+        const newVal = prev + amount;
+        if (user) {
+            NetlifyService.saveUserData(user.id, {
+                analytics,
+                sessions: [],
+                credits: newVal,
+                planId: selectedPlan
+            });
+        } else {
+            localStorage.setItem('nexus_credits', newVal.toString());
+        }
+        return newVal;
+    });
+    setIsCreditModalOpen(false);
+  };
+
+  const handleDeductCredits = (amount: number) => {
+    setCredits(prev => {
+        const newVal = Math.max(0, prev - amount);
+        if (user) {
+            NetlifyService.saveUserData(user.id, {
+                analytics,
+                sessions: [],
+                credits: newVal,
+                planId: selectedPlan
+            });
+        } else {
+            localStorage.setItem('nexus_credits', newVal.toString());
+        }
+        return newVal;
+    });
+  };
+
   // Trial Expiry Check
   useEffect(() => {
     if (!trialExpiry) return;
@@ -132,16 +167,22 @@ export const App: React.FC = () => {
         setTrialExpiry(null);
         localStorage.removeItem('nexus_trial_expiry');
         alert("Trial expired. Reverting to Free tier.");
+        if (user) {
+           NetlifyService.saveUserData(user.id, { analytics, sessions: [], credits, planId: 'free' });
+        }
       }
     }, 5000);
     return () => clearInterval(interval);
-  }, [trialExpiry]);
+  }, [trialExpiry, user, credits, analytics]); // Added deps for saveUserData closure
 
   const handleSelectPlan = (planId: string) => {
     if (planId === 'free') {
       setSelectedPlan('free');
       setTrialExpiry(null);
       localStorage.removeItem('nexus_trial_expiry');
+      if (user) {
+          NetlifyService.saveUserData(user.id, { analytics, sessions: [], credits, planId: 'free' });
+      }
       setCurrentView('chat');
       return;
     }
@@ -163,6 +204,11 @@ export const App: React.FC = () => {
     setTrialExpiry(expiryTime);
     localStorage.setItem('nexus_trial_expiry', expiryTime.toString());
     localStorage.setItem('nexus_used_trials', JSON.stringify([...usedTrials, planId]));
+    
+    if (user) {
+        NetlifyService.saveUserData(user.id, { analytics, sessions: [], credits, planId });
+    }
+
     setCurrentView('chat');
   };
 
@@ -199,7 +245,7 @@ export const App: React.FC = () => {
           selectedPlanId={selectedPlan} 
           customPlanConfig={customPlan} 
           credits={credits} 
-          onDeductCredits={(a) => setCredits(c => Math.max(0, c - a))} 
+          onDeductCredits={handleDeductCredits} 
           onUsageUpdate={handleUsageUpdate}
           user={user}
           cloudSessions={cloudSessions}
@@ -273,7 +319,7 @@ export const App: React.FC = () => {
         </div>
       )}
       {isEnterpriseBuilderOpen && <EnterpriseBuilder onClose={() => setIsEnterpriseBuilderOpen(false)} onActivate={(c) => { setCustomPlan(c); setSelectedPlan('enterprise-custom'); setIsEnterpriseBuilderOpen(false); setCurrentView('chat'); }} />}
-      {isCreditModalOpen && <CreditModal onClose={() => setIsCreditModalOpen(false)} onAddCredits={(a) => { setCredits(p => p + a); setIsCreditModalOpen(false); }} />}
+      {isCreditModalOpen && <CreditModal onClose={() => setIsCreditModalOpen(false)} onAddCredits={handleAddCredits} />}
     </div>
   );
 };
