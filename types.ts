@@ -17,6 +17,9 @@ export interface UserProfile {
   planId: string;
   avatarUrl?: string;
   createdAt: number;
+  // Enterprise Fields
+  enterpriseConfig?: CustomPlanConfig;
+  teamMembers?: string[]; // List of emails
 }
 
 export interface UserAnalytics {
@@ -85,6 +88,10 @@ export interface NavbarProps {
   user: UserProfile | null;
   onLoginClick: () => void;
   onLogoutClick: () => void;
+  // New props for account switching
+  activeProfileMode: 'personal' | 'enterprise';
+  onSwitchProfileMode: () => void;
+  onManageSubscription: () => void;
 }
 
 export interface AIModel {

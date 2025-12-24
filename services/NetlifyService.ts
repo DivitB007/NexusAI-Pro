@@ -1,5 +1,5 @@
 import { neon } from '@netlify/neon';
-import { UserProfile, UserAnalytics, ChatSession } from '../types';
+import { UserProfile, UserAnalytics, ChatSession, CustomPlanConfig } from '../types';
 
 const DEFAULT_ANALYTICS: UserAnalytics = {
   totalTokens: 0,
@@ -41,7 +41,8 @@ try {
             user_id TEXT PRIMARY KEY,
             analytics JSONB DEFAULT '{}'::jsonb,
             credits INTEGER DEFAULT 0,
-            sessions JSONB DEFAULT '[]'::jsonb
+            sessions JSONB DEFAULT '[]'::jsonb,
+            enterprise_data JSONB DEFAULT '{}'::jsonb
           );
         `;
         console.log("[Netlify DB] Schema verification complete.");
@@ -55,6 +56,15 @@ try {
   }
 } catch (e) {
   console.warn("[Netlify DB] Initialization error:", e);
+}
+
+interface UserDataPayload {
+    analytics: UserAnalytics;
+    sessions: ChatSession[];
+    credits: number;
+    planId: string;
+    enterpriseConfig?: CustomPlanConfig;
+    teamMembers?: string[];
 }
 
 export const NetlifyService = {
@@ -119,10 +129,10 @@ export const NetlifyService = {
           VALUES (${id}, ${email}, ${password}, ${name}, 'free', ${createdAt}, ${avatarUrl})
         `;
 
-        // 2. Initialize Data - Using stringified JSON to ensure compatibility
+        // 2. Initialize Data
         await sql`
-          INSERT INTO user_data (user_id, analytics, credits, sessions)
-          VALUES (${id}, ${JSON.stringify(DEFAULT_ANALYTICS)}, 0, ${JSON.stringify([])})
+          INSERT INTO user_data (user_id, analytics, credits, sessions, enterprise_data)
+          VALUES (${id}, ${JSON.stringify(DEFAULT_ANALYTICS)}, 0, ${JSON.stringify([])}, '{}'::jsonb)
         `;
 
         return {
@@ -164,7 +174,7 @@ export const NetlifyService = {
     });
   },
 
-  async syncUserData(userId: string): Promise<{ analytics: UserAnalytics, sessions: ChatSession[], credits: number, planId: string }> {
+  async syncUserData(userId: string): Promise<UserDataPayload> {
     if (isCloudEnabled && sql) {
        try {
          const userDataResult = await sql`SELECT * FROM user_data WHERE user_id = ${userId}`;
@@ -175,30 +185,32 @@ export const NetlifyService = {
          if (userDataResult && userDataResult.length > 0) {
             const data = userDataResult[0];
             
-            // Handle potential double-serialization or raw object return
-            let analytics = data.analytics;
-            if (typeof analytics === 'string') {
-                try { analytics = JSON.parse(analytics); } catch(e) {}
-            }
+            // Helper for parsing potential strings
+            const parse = (val: any) => {
+               if (typeof val === 'string') {
+                   try { return JSON.parse(val); } catch(e) { return val; }
+               }
+               return val;
+            };
 
-            let sessions = data.sessions;
-            if (typeof sessions === 'string') {
-                try { sessions = JSON.parse(sessions); } catch(e) {}
-            }
+            const analytics = parse(data.analytics);
+            const sessions = parse(data.sessions);
+            const enterpriseData = parse(data.enterprise_data || {});
 
             return {
                 analytics: analytics || DEFAULT_ANALYTICS,
                 sessions: Array.isArray(sessions) ? sessions : [],
                 credits: data.credits || 0,
-                planId: planId
+                planId: planId,
+                enterpriseConfig: enterpriseData.config,
+                teamMembers: enterpriseData.members || []
             };
          }
          
-         // If user_data missing but user exists, return defaults
-         return { analytics: DEFAULT_ANALYTICS, sessions: [], credits: 0, planId: planId };
+         return { analytics: DEFAULT_ANALYTICS, sessions: [], credits: 0, planId: planId, teamMembers: [] };
        } catch (e) {
          console.warn("Cloud Sync Error:", e);
-         return { analytics: DEFAULT_ANALYTICS, sessions: [], credits: 0, planId: 'free' };
+         return { analytics: DEFAULT_ANALYTICS, sessions: [], credits: 0, planId: 'free', teamMembers: [] };
        }
     } else {
       // LOCAL SIMULATION
@@ -210,41 +222,37 @@ export const NetlifyService = {
             analytics: data.analytics || DEFAULT_ANALYTICS,
             sessions: data.sessions || [],
             credits: data.credits || 0,
-            planId: data.planId || 'free'
+            planId: data.planId || 'free',
+            enterpriseConfig: data.enterpriseConfig,
+            teamMembers: data.teamMembers || []
           });
         }, LATENCY_MS);
       });
     }
   },
 
-  async saveUserData(userId: string, data: { analytics: UserAnalytics, sessions: ChatSession[], credits: number, planId: string }): Promise<void> {
+  async saveUserData(userId: string, data: UserDataPayload): Promise<void> {
     if (isCloudEnabled && sql) {
        try {
          // 1. Update Plan in Users Table
          await sql`UPDATE users SET plan_id = ${data.planId} WHERE id = ${userId}`;
 
-         // 2. Upsert User Data
-         // We explicitly include sessions here to ensure the row is complete if it's a new insert
-         // But on update, we preserve existing sessions if not provided, OR update them if needed. 
-         // Since saveUserData is often called with empty sessions from App.tsx (bad practice but existing), 
-         // we should only update analytics and credits on conflict if we want to preserve sessions stored in DB.
-         
-         // However, correct approach is:
-         // If we are just saving metadata (credits/plan), we don't want to overwrite sessions with [].
-         // The safe way is to separate these or read-modify-write, but for efficiency in SQL:
-         
+         // 2. Prepare Enterprise Data
+         const enterpriseData = {
+            config: data.enterpriseConfig,
+            members: data.teamMembers
+         };
+
+         // 3. Upsert User Data
          await sql`
-            INSERT INTO user_data (user_id, analytics, credits, sessions)
-            VALUES (${userId}, ${JSON.stringify(data.analytics)}, ${data.credits}, ${JSON.stringify([])})
+            INSERT INTO user_data (user_id, analytics, credits, sessions, enterprise_data)
+            VALUES (${userId}, ${JSON.stringify(data.analytics)}, ${data.credits}, ${JSON.stringify([])}, ${JSON.stringify(enterpriseData)})
             ON CONFLICT (user_id) 
             DO UPDATE SET 
               analytics = ${JSON.stringify(data.analytics)}, 
-              credits = ${data.credits}
+              credits = ${data.credits},
+              enterprise_data = ${JSON.stringify(enterpriseData)}
          `;
-         // Note: We deliberately DO NOT update 'sessions' in the DO UPDATE clause above 
-         // because App.tsx often passes an empty array for sessions during metadata updates.
-         // Sessions are saved separately via saveUserSessions.
-
        } catch (e) {
          console.error("Cloud Save Error", e);
        }
@@ -253,7 +261,6 @@ export const NetlifyService = {
       return new Promise((resolve) => {
         const storageKey = `nexus_data_${userId}`;
         const existing = JSON.parse(localStorage.getItem(storageKey) || '{}');
-        // Merge to avoid losing sessions if not provided
         const merged = { ...existing, ...data };
         if (data.sessions.length === 0 && existing.sessions?.length > 0) {
             merged.sessions = existing.sessions;

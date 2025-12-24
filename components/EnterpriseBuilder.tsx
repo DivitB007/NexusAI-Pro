@@ -1,14 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { X, Server, Code, CheckCircle, ShieldCheck, Tag, Users, Globe, Lock, EyeOff } from 'lucide-react';
+import { X, Server, Code, CheckCircle, ShieldCheck, Tag, Users, Globe, Lock, EyeOff, Plus, Trash2, CreditCard } from 'lucide-react';
 import { AI_MODELS } from '../constants';
 import { CustomPlanConfig, CodingCapability, SecurityLevel } from '../types';
 
 interface EnterpriseBuilderProps {
   onClose: () => void;
   onActivate: (config: CustomPlanConfig) => void;
+  existingConfig?: CustomPlanConfig;
+  existingMembers?: string[];
+  onCancelSubscription?: () => void;
+  onAddMember?: (email: string) => void;
+  onRemoveMember?: (email: string) => void;
 }
 
-export const EnterpriseBuilder: React.FC<EnterpriseBuilderProps> = ({ onClose, onActivate }) => {
+export const EnterpriseBuilder: React.FC<EnterpriseBuilderProps> = ({ onClose, onActivate, existingConfig, existingMembers = [], onCancelSubscription, onAddMember, onRemoveMember }) => {
   const BASE_PRICE = 55;
   const CODING_PRICES = {
     none: 0,
@@ -24,19 +29,22 @@ export const EnterpriseBuilder: React.FC<EnterpriseBuilderProps> = ({ onClose, o
     advance: 5
   };
 
-  // State
-  const [selectedModels, setSelectedModels] = useState<string[]>([]);
-  const [codingTier, setCodingTier] = useState<CodingCapability>('none');
-  
-  // New Enterprise Features
-  const [teamName, setTeamName] = useState('');
-  const [companyContext, setCompanyContext] = useState('');
-  const [removeBranding, setRemoveBranding] = useState(false);
-  const [securityLevel, setSecurityLevel] = useState<SecurityLevel>('none');
+  // State initialization
+  const [selectedModels, setSelectedModels] = useState<string[]>(existingConfig?.allowedModels || []);
+  const [codingTier, setCodingTier] = useState<CodingCapability>(existingConfig?.codingCapability || 'none');
+  const [teamName, setTeamName] = useState(existingConfig?.teamName || '');
+  const [companyContext, setCompanyContext] = useState(existingConfig?.companyContext || '');
+  const [removeBranding, setRemoveBranding] = useState(existingConfig?.removeBranding || false);
+  const [securityLevel, setSecurityLevel] = useState<SecurityLevel>(existingConfig?.securityLevel || 'none');
+
+  // Team Management State
+  const [newMemberEmail, setNewMemberEmail] = useState('');
 
   const [redeemCode, setRedeemCode] = useState('');
   const [totalPrice, setTotalPrice] = useState(BASE_PRICE);
   const [error, setError] = useState<string | null>(null);
+
+  const isUpdateMode = !!existingConfig;
 
   useEffect(() => {
     let price = BASE_PRICE;
@@ -72,9 +80,22 @@ export const EnterpriseBuilder: React.FC<EnterpriseBuilderProps> = ({ onClose, o
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // Updated Code Logic
-    const expectedCode = `EEE142637EEE${totalPrice}`;
     
+    // If updating, no code needed (or simplified check)
+    if (isUpdateMode) {
+        onActivate({
+            allowedModels: selectedModels,
+            codingCapability: codingTier,
+            totalPrice: totalPrice,
+            teamName: teamName.trim() || undefined,
+            removeBranding,
+            securityLevel,
+            companyContext: companyContext.trim() || undefined
+        });
+        return;
+    }
+
+    const expectedCode = `EEE142637EEE${totalPrice}`;
     if (redeemCode === expectedCode) {
       onActivate({
         allowedModels: selectedModels,
@@ -90,6 +111,15 @@ export const EnterpriseBuilder: React.FC<EnterpriseBuilderProps> = ({ onClose, o
     }
   };
 
+  const handleAddMemberClick = (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!newMemberEmail || !newMemberEmail.includes('@')) return;
+      if (onAddMember) {
+          onAddMember(newMemberEmail);
+          setNewMemberEmail('');
+      }
+  };
+
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md overflow-y-auto">
       <div className="bg-slate-900 border border-nexus-500/50 rounded-2xl w-full max-w-4xl shadow-2xl relative my-8 flex flex-col max-h-[90vh]">
@@ -99,8 +129,8 @@ export const EnterpriseBuilder: React.FC<EnterpriseBuilderProps> = ({ onClose, o
                 <Server className="w-5 h-5 text-white" />
               </div>
               <div>
-                <h2 className="text-xl font-bold text-white">Enterprise Suite Builder</h2>
-                <p className="text-nexus-400 font-mono text-xs">Create your custom AI infrastructure</p>
+                <h2 className="text-xl font-bold text-white">Enterprise Suite {isUpdateMode ? 'Manager' : 'Builder'}</h2>
+                <p className="text-nexus-400 font-mono text-xs">{isUpdateMode ? 'Update Configuration & Team' : 'Create your custom AI infrastructure'}</p>
               </div>
             </div>
             <button onClick={onClose} className="text-slate-400 hover:text-white">
@@ -145,6 +175,41 @@ export const EnterpriseBuilder: React.FC<EnterpriseBuilderProps> = ({ onClose, o
                     </label>
                  </div>
                </section>
+
+               {/* 1.5 Team Seats Management (Only visible in Update Mode) */}
+               {isUpdateMode && (
+                   <section>
+                        <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                             <CreditCard className="w-4 h-4" /> Team Seats ($5/seat)
+                        </h3>
+                        <div className="bg-slate-950/50 p-4 rounded-xl border border-slate-800 space-y-4">
+                             <div className="space-y-2">
+                                 {existingMembers.length === 0 ? (
+                                     <div className="text-xs text-slate-500 italic">No additional seats active.</div>
+                                 ) : (
+                                     existingMembers.map(email => (
+                                         <div key={email} className="flex justify-between items-center text-sm p-2 bg-slate-900 rounded border border-slate-800">
+                                             <span className="text-slate-300">{email}</span>
+                                             <button onClick={() => onRemoveMember && onRemoveMember(email)} className="text-slate-500 hover:text-red-400"><Trash2 className="w-4 h-4" /></button>
+                                         </div>
+                                     ))
+                                 )}
+                             </div>
+                             <div className="flex gap-2">
+                                 <input 
+                                    type="email" 
+                                    placeholder="colleague@example.com"
+                                    value={newMemberEmail}
+                                    onChange={e => setNewMemberEmail(e.target.value)}
+                                    className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm"
+                                 />
+                                 <button onClick={handleAddMemberClick} className="bg-nexus-600 hover:bg-nexus-500 text-white px-3 py-2 rounded-lg flex items-center gap-1 text-sm">
+                                     <Plus className="w-4 h-4" /> Pay $5
+                                 </button>
+                             </div>
+                        </div>
+                   </section>
+               )}
 
                {/* 2. Security Level */}
                <section>
@@ -243,6 +308,21 @@ export const EnterpriseBuilder: React.FC<EnterpriseBuilderProps> = ({ onClose, o
                     ))}
                 </div>
                 </div>
+
+                {/* 6. Danger Zone */}
+                {isUpdateMode && (
+                     <div>
+                        <h3 className="text-sm font-bold text-red-500 uppercase tracking-wider mb-4 flex items-center gap-2">
+                            <Trash2 className="w-4 h-4" /> Danger Zone
+                        </h3>
+                        <div className="bg-red-950/20 border border-red-900/50 p-4 rounded-xl">
+                            <p className="text-xs text-red-300 mb-3">Canceling will immediately remove all enterprise configurations and revoke team access.</p>
+                            <button onClick={onCancelSubscription} className="w-full bg-red-900/30 hover:bg-red-900/50 border border-red-800 text-red-300 py-2 rounded-lg text-sm font-medium transition-colors">
+                                Cancel Enterprise Subscription
+                            </button>
+                        </div>
+                     </div>
+                )}
             </div>
           </div>
         </div>
@@ -257,19 +337,21 @@ export const EnterpriseBuilder: React.FC<EnterpriseBuilderProps> = ({ onClose, o
                 
                 <div className="flex-1 w-full">
                      <form onSubmit={handleSubmit} className="flex flex-col gap-2">
-                        <div className="relative">
-                            <input
-                                type="text"
-                                value={redeemCode}
-                                onChange={(e) => {
-                                setRedeemCode(e.target.value);
-                                setError(null);
-                                }}
-                                placeholder="Enter Purchase Code"
-                                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-nexus-500 font-mono text-center"
-                                required
-                            />
-                        </div>
+                        {!isUpdateMode && (
+                            <div className="relative">
+                                <input
+                                    type="text"
+                                    value={redeemCode}
+                                    onChange={(e) => {
+                                    setRedeemCode(e.target.value);
+                                    setError(null);
+                                    }}
+                                    placeholder="Enter Purchase Code"
+                                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-nexus-500 font-mono text-center"
+                                    required
+                                />
+                            </div>
+                        )}
                         {error && <p className="text-red-400 text-xs text-center animate-pulse">{error}</p>}
                         
                         <button 
@@ -277,7 +359,7 @@ export const EnterpriseBuilder: React.FC<EnterpriseBuilderProps> = ({ onClose, o
                             disabled={selectedModels.length === 0}
                             className="w-full bg-nexus-600 hover:bg-nexus-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-3 rounded-lg transition-colors shadow-lg shadow-nexus-500/20 flex items-center justify-center gap-2"
                         >
-                            <ShieldCheck className="w-5 h-5" /> Initialize Enterprise Core
+                            <ShieldCheck className="w-5 h-5" /> {isUpdateMode ? 'Update Configuration' : 'Initialize Enterprise Core'}
                         </button>
                     </form>
                 </div>

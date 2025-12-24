@@ -33,6 +33,19 @@ export const App: React.FC = () => {
         return saved ? JSON.parse(saved) : null;
     } catch(e) { return null; }
   });
+
+  // Profile Mode: 'personal' or 'enterprise'
+  const [activeProfileMode, setActiveProfileMode] = useState<'personal' | 'enterprise'>('personal');
+
+  // Set default mode when user loads
+  useEffect(() => {
+    if (user && (user.enterpriseConfig || user.planId === 'enterprise-custom')) {
+        // If they have enterprise, stay on current preference or default to personal if not set
+        // For now, defaulting to personal unless switched
+    } else {
+        setActiveProfileMode('personal');
+    }
+  }, [user]);
   
   // Analytics State (Now synchronized via User)
   const [analytics, setAnalytics] = useState<UserAnalytics>({
@@ -41,6 +54,7 @@ export const App: React.FC = () => {
   
   const [cloudSessions, setCloudSessions] = useState<ChatSession[] | null>(null);
 
+  // Local/Personal Plan State
   const [selectedPlan, setSelectedPlan] = useState<string>('free');
   const [trialExpiry, setTrialExpiry] = useState<number | null>(null);
   const [usedTrials, setUsedTrials] = useState<string[]>([]);
@@ -104,11 +118,37 @@ export const App: React.FC = () => {
         setCredits(data.credits);
         setSelectedPlan(data.planId);
         setCloudSessions(data.sessions);
+        
+        // Update user object with latest enterprise config from DB
+        setUser(prev => prev ? { 
+            ...prev, 
+            enterpriseConfig: data.enterpriseConfig, 
+            teamMembers: data.teamMembers 
+        } : null);
+        
+        if (data.enterpriseConfig) {
+            setCustomPlan(data.enterpriseConfig);
+        }
       });
     } else {
         setCloudSessions(null);
     }
-  }, [user]);
+  }, [user?.id]); // Only re-run if ID changes
+
+  // HELPER: Save everything to Cloud
+  const saveAllToCloud = (overrideUser?: UserProfile) => {
+      const u = overrideUser || user;
+      if (u) {
+          NetlifyService.saveUserData(u.id, {
+              analytics,
+              sessions: [], // Sessions saved separately
+              credits,
+              planId: selectedPlan,
+              enterpriseConfig: u.enterpriseConfig,
+              teamMembers: u.teamMembers
+          });
+      }
+  };
 
   // Handle Analytics Update from ChatInterface
   const handleUsageUpdate = (tokens: number, costEstimate: number, modelId: string) => {
@@ -126,13 +166,14 @@ export const App: React.FC = () => {
           history: newHistory
        };
 
-       // Sync to cloud if logged in
        if (user) {
            NetlifyService.saveUserData(user.id, {
                analytics: newStats,
-               sessions: [], // Sessions handled by ChatInterface directly now
+               sessions: [],
                credits,
-               planId: selectedPlan
+               planId: selectedPlan,
+               enterpriseConfig: user.enterpriseConfig,
+               teamMembers: user.teamMembers
            });
        }
        return newStats;
@@ -143,12 +184,14 @@ export const App: React.FC = () => {
     setCredits(prev => {
         const newVal = prev + amount;
         if (user) {
-            NetlifyService.saveUserData(user.id, {
-                analytics,
-                sessions: [],
-                credits: newVal,
-                planId: selectedPlan
-            });
+             NetlifyService.saveUserData(user.id, {
+               analytics,
+               sessions: [],
+               credits: newVal,
+               planId: selectedPlan,
+               enterpriseConfig: user.enterpriseConfig,
+               teamMembers: user.teamMembers
+           });
         } else {
             localStorage.setItem('nexus_credits', newVal.toString());
         }
@@ -158,15 +201,20 @@ export const App: React.FC = () => {
   };
 
   const handleDeductCredits = (amount: number) => {
+    // If enterprise mode, we assume unlimited or separate billing, so NO credit deduction from personal account
+    if (activeProfileMode === 'enterprise') return;
+
     setCredits(prev => {
         const newVal = Math.max(0, prev - amount);
         if (user) {
             NetlifyService.saveUserData(user.id, {
-                analytics,
-                sessions: [],
-                credits: newVal,
-                planId: selectedPlan
-            });
+               analytics,
+               sessions: [],
+               credits: newVal,
+               planId: selectedPlan,
+               enterpriseConfig: user.enterpriseConfig,
+               teamMembers: user.teamMembers
+           });
         } else {
             localStorage.setItem('nexus_credits', newVal.toString());
         }
@@ -183,22 +231,18 @@ export const App: React.FC = () => {
         setTrialExpiry(null);
         localStorage.removeItem('nexus_trial_expiry');
         alert("Trial expired. Reverting to Free tier.");
-        if (user) {
-           NetlifyService.saveUserData(user.id, { analytics, sessions: [], credits, planId: 'free' });
-        }
+        saveAllToCloud();
       }
     }, 5000);
     return () => clearInterval(interval);
-  }, [trialExpiry, user, credits, analytics]); // Added deps for saveUserData closure
+  }, [trialExpiry, user, credits, analytics]); 
 
   const handleSelectPlan = (planId: string) => {
     if (planId === 'free') {
       setSelectedPlan('free');
       setTrialExpiry(null);
       localStorage.removeItem('nexus_trial_expiry');
-      if (user) {
-          NetlifyService.saveUserData(user.id, { analytics, sessions: [], credits, planId: 'free' });
-      }
+      saveAllToCloud();
       setCurrentView('chat');
       return;
     }
@@ -221,10 +265,7 @@ export const App: React.FC = () => {
     localStorage.setItem('nexus_trial_expiry', expiryTime.toString());
     localStorage.setItem('nexus_used_trials', JSON.stringify([...usedTrials, planId]));
     
-    if (user) {
-        NetlifyService.saveUserData(user.id, { analytics, sessions: [], credits, planId });
-    }
-
+    saveAllToCloud();
     setCurrentView('chat');
   };
 
@@ -238,15 +279,72 @@ export const App: React.FC = () => {
     if (planId) {
       setTrialExpiry(null); localStorage.removeItem('nexus_trial_expiry');
       setSelectedPlan(planId); 
-      // Sync plan to user profile
-      if (user) {
-         NetlifyService.saveUserData(user.id, { analytics, sessions: [], credits, planId });
-      }
+      saveAllToCloud();
       setCurrentView('chat');
       setIsRedeemOpen(false); setRedeemInput('');
     } else {
       setRedeemError("Invalid code.");
     }
+  };
+
+  // Enterprise Management
+  const handleUpdateEnterprise = (config: CustomPlanConfig) => {
+      setCustomPlan(config);
+      // Determine plan ID. If active mode is enterprise, ensure ID is set.
+      if (activeProfileMode === 'enterprise' || selectedPlan !== 'enterprise-custom') {
+        setSelectedPlan('enterprise-custom');
+      }
+
+      if (user) {
+          const updatedUser = { ...user, enterpriseConfig: config };
+          setUser(updatedUser);
+          saveAllToCloud(updatedUser);
+      }
+      setIsEnterpriseBuilderOpen(false);
+      setCurrentView('chat');
+  };
+
+  const handleCancelEnterprise = () => {
+      if (window.confirm("Are you sure you want to cancel your Enterprise Suite? This will remove all configurations and team access.")) {
+          setCustomPlan(undefined);
+          setSelectedPlan('free');
+          setActiveProfileMode('personal');
+          
+          if (user) {
+              const updatedUser = { ...user, enterpriseConfig: undefined, teamMembers: [] };
+              setUser(updatedUser);
+              saveAllToCloud(updatedUser);
+          }
+          setIsEnterpriseBuilderOpen(false);
+      }
+  };
+
+  const handleCancelSubscription = () => {
+       if (window.confirm("Cancel current subscription and revert to Free?")) {
+           handleSelectPlan('free');
+           // Also clear trial if any
+           setTrialExpiry(null);
+       }
+  };
+
+  const handleAddTeamMember = (email: string) => {
+      if (!user) return;
+      const currentMembers = user.teamMembers || [];
+      if (currentMembers.includes(email)) return;
+      
+      const updatedMembers = [...currentMembers, email];
+      const updatedUser = { ...user, teamMembers: updatedMembers };
+      setUser(updatedUser);
+      saveAllToCloud(updatedUser);
+      alert(`Seat added for ${email}. $5 charged to method on file.`);
+  };
+
+  const handleRemoveTeamMember = (email: string) => {
+      if (!user) return;
+      const updatedMembers = (user.teamMembers || []).filter(e => e !== email);
+      const updatedUser = { ...user, teamMembers: updatedMembers };
+      setUser(updatedUser);
+      saveAllToCloud(updatedUser);
   };
 
   const getIconForPlan = (index: number) => {
@@ -255,11 +353,28 @@ export const App: React.FC = () => {
   };
 
   const renderContent = () => {
+    // Effective Plan Logic based on Profile Mode
+    let effectivePlanId = selectedPlan;
+    let effectiveCustomPlan = customPlan;
+
+    if (activeProfileMode === 'enterprise') {
+        effectivePlanId = 'enterprise-custom';
+        effectiveCustomPlan = user?.enterpriseConfig || customPlan;
+    } else {
+        // Personal Mode: Ignore Enterprise Config
+        effectiveCustomPlan = undefined;
+        // If the main plan variable is stuck on enterprise but we are in personal, fall back to free or last personal
+        if (effectivePlanId === 'enterprise-custom') {
+            // In a real app we'd store personalPlanId separately. For now, revert to free visual.
+            effectivePlanId = 'free'; 
+        }
+    }
+
     switch(currentView) {
       case 'chat': return (
         <ChatInterface 
-          selectedPlanId={selectedPlan} 
-          customPlanConfig={customPlan} 
+          selectedPlanId={effectivePlanId} 
+          customPlanConfig={effectiveCustomPlan} 
           credits={credits} 
           onDeductCredits={handleDeductCredits} 
           onUsageUpdate={handleUsageUpdate}
@@ -301,6 +416,9 @@ export const App: React.FC = () => {
     );
   }
 
+  // Calculate Title based on Mode
+  const displayTitle = activeProfileMode === 'enterprise' ? (user?.enterpriseConfig?.teamName || "Enterprise") : undefined;
+
   return (
     <div className="flex flex-col min-h-screen bg-slate-950 text-white selection:bg-nexus-500 selection:text-white">
       <Navbar 
@@ -309,12 +427,27 @@ export const App: React.FC = () => {
         onRedeemClick={() => setIsRedeemOpen(true)} 
         onAddCreditsClick={() => setIsCreditModalOpen(true)} 
         trialExpiry={trialExpiry} 
-        credits={credits} 
-        planName={SUBSCRIPTION_PLANS.find(p => p.id === selectedPlan)?.name} 
-        customTitle={customPlan?.teamName} 
+        credits={activeProfileMode === 'enterprise' ? 999999 : credits} // Enterprise has infinite/pooled credits logic visually
+        planName={activeProfileMode === 'enterprise' ? 'Enterprise' : SUBSCRIPTION_PLANS.find(p => p.id === selectedPlan)?.name} 
+        customTitle={displayTitle} 
         user={user}
         onLoginClick={() => setIsAuthModalOpen(true)}
-        onLogoutClick={() => setUser(null)}
+        onLogoutClick={() => { setUser(null); setActiveProfileMode('personal'); }}
+        activeProfileMode={activeProfileMode}
+        onSwitchProfileMode={() => setActiveProfileMode(prev => prev === 'personal' ? 'enterprise' : 'personal')}
+        onManageSubscription={() => {
+            if (activeProfileMode === 'enterprise') {
+                setIsEnterpriseBuilderOpen(true);
+            } else {
+                // If personal, show standard pricing but maybe a "Manage" modal in future. For now, navigate to pricing.
+                // We'll open a confirm dialog to cancel if they want.
+                if (selectedPlan !== 'free') {
+                    handleCancelSubscription();
+                } else {
+                    setCurrentView('pricing');
+                }
+            }
+        }}
       />
       <main className="flex-grow">{renderContent()}</main>
       {currentView !== 'chat' && <Footer />}
@@ -334,7 +467,19 @@ export const App: React.FC = () => {
            </div>
         </div>
       )}
-      {isEnterpriseBuilderOpen && <EnterpriseBuilder onClose={() => setIsEnterpriseBuilderOpen(false)} onActivate={(c) => { setCustomPlan(c); setSelectedPlan('enterprise-custom'); setIsEnterpriseBuilderOpen(false); setCurrentView('chat'); }} />}
+      
+      {isEnterpriseBuilderOpen && (
+        <EnterpriseBuilder 
+            onClose={() => setIsEnterpriseBuilderOpen(false)} 
+            onActivate={handleUpdateEnterprise} 
+            existingConfig={user?.enterpriseConfig}
+            existingMembers={user?.teamMembers}
+            onCancelSubscription={handleCancelEnterprise}
+            onAddMember={handleAddTeamMember}
+            onRemoveMember={handleRemoveTeamMember}
+        />
+      )}
+      
       {isCreditModalOpen && <CreditModal onClose={() => setIsCreditModalOpen(false)} onAddCredits={handleAddCredits} />}
     </div>
   );

@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Cpu, Menu, X, MessageSquare, Key, Plus, Coins, BarChart3, Settings, LogIn, LogOut, User as UserIcon } from 'lucide-react';
+import { Cpu, Menu, X, MessageSquare, Key, Plus, Coins, BarChart3, Settings, LogIn, LogOut, User as UserIcon, Building, CreditCard, RefreshCw } from 'lucide-react';
 import { NavbarProps, View } from '../types';
 
-export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate, onRedeemClick, onAddCreditsClick, trialExpiry, credits = 0, planName, customTitle, isGodModeActive, user, onLoginClick, onLogoutClick }) => {
+export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate, onRedeemClick, onAddCreditsClick, trialExpiry, credits = 0, planName, customTitle, isGodModeActive, user, onLoginClick, onLogoutClick, activeProfileMode, onSwitchProfileMode, onManageSubscription }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [timeLeft, setTimeLeft] = useState<string | null>(null);
@@ -22,12 +22,14 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate, onRedee
 
   const navItemClass = (view: View) => `text-sm font-medium transition-colors cursor-pointer ${currentView === view ? 'text-white' : 'text-slate-400 hover:text-white'}`;
 
+  const hasEnterpriseAccess = user?.enterpriseConfig || user?.planId === 'enterprise-custom';
+
   return (
     <nav className="sticky top-0 z-50 w-full border-b border-slate-800 bg-slate-950/80 backdrop-blur-xl">
       <div className="container mx-auto px-4">
         <div className="flex h-16 items-center justify-between">
           <div className="flex items-center gap-3 cursor-pointer group" onClick={() => onNavigate('home')}>
-            <div className={`p-2 rounded-lg transition-all duration-300 ${isGodModeActive ? 'bg-amber-600 shadow-[0_0_15px_rgba(245,158,11,0.5)]' : 'bg-nexus-600 group-hover:shadow-[0_0_15px_rgba(56,189,248,0.5)]'}`}>
+            <div className={`p-2 rounded-lg transition-all duration-300 ${isGodModeActive ? 'bg-amber-600 shadow-[0_0_15px_rgba(245,158,11,0.5)]' : activeProfileMode === 'enterprise' ? 'bg-indigo-600 shadow-[0_0_15px_rgba(99,102,241,0.5)]' : 'bg-nexus-600 group-hover:shadow-[0_0_15px_rgba(56,189,248,0.5)]'}`}>
               <Cpu className="w-6 h-6 text-white" />
             </div>
             <div className="flex flex-col">
@@ -50,11 +52,13 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate, onRedee
             <div className="h-6 w-px bg-slate-800 mx-2"></div>
             
             <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-full px-3 py-1.5 cursor-pointer hover:border-emerald-500/50 transition-colors" onClick={onAddCreditsClick}>
-                 <Coins className="w-4 h-4 text-emerald-400" />
-                 <span className="text-sm font-mono font-medium text-emerald-400">{credits.toLocaleString()}</span>
-                 <Plus className="w-3 h-3 text-slate-500" />
-              </div>
+              {activeProfileMode === 'personal' && (
+                  <div className="flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-full px-3 py-1.5 cursor-pointer hover:border-emerald-500/50 transition-colors" onClick={onAddCreditsClick}>
+                     <Coins className="w-4 h-4 text-emerald-400" />
+                     <span className="text-sm font-mono font-medium text-emerald-400">{credits.toLocaleString()}</span>
+                     <Plus className="w-3 h-3 text-slate-500" />
+                  </div>
+              )}
 
               {user ? (
                 <div className="relative">
@@ -65,14 +69,35 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate, onRedee
                   </button>
                   
                   {isProfileOpen && (
-                    <div className="absolute top-full right-0 mt-2 w-48 bg-slate-900 border border-slate-700 rounded-xl shadow-xl z-50 p-1">
-                      <div className="px-3 py-2 border-b border-slate-800 mb-1">
-                        <div className="text-xs text-slate-500">Plan</div>
-                        <div className="text-sm font-bold text-white capitalize">{planName || 'Free'}</div>
+                    <div className="absolute top-full right-0 mt-2 w-64 bg-slate-900 border border-slate-700 rounded-xl shadow-xl z-50 p-1">
+                      <div className="px-3 py-3 border-b border-slate-800 mb-1">
+                        <div className="flex justify-between items-center">
+                            <div className="text-xs text-slate-500">Current Profile</div>
+                            <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${activeProfileMode === 'enterprise' ? 'bg-indigo-900 text-indigo-300' : 'bg-slate-800 text-slate-300'}`}>
+                                {activeProfileMode}
+                            </span>
+                        </div>
+                        <div className="text-sm font-bold text-white capitalize mt-1">{activeProfileMode === 'enterprise' ? (customTitle || 'Enterprise') : (planName || 'Free')}</div>
                       </div>
-                      <button onClick={onRedeemClick} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg">
-                        <Key className="w-4 h-4" /> Redeem Code
+
+                      {hasEnterpriseAccess && (
+                          <button onClick={() => { onSwitchProfileMode(); setIsProfileOpen(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg">
+                             <RefreshCw className="w-4 h-4 text-nexus-400" /> 
+                             Switch to {activeProfileMode === 'personal' ? 'Enterprise' : 'Personal'}
+                          </button>
+                      )}
+
+                      <button onClick={() => { onManageSubscription(); setIsProfileOpen(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg">
+                        {activeProfileMode === 'enterprise' ? <Building className="w-4 h-4 text-purple-400" /> : <CreditCard className="w-4 h-4 text-green-400" />}
+                        Manage {activeProfileMode === 'enterprise' ? 'Enterprise' : 'Subscription'}
                       </button>
+
+                      <button onClick={onRedeemClick} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg">
+                        <Key className="w-4 h-4 text-yellow-500" /> Redeem Code
+                      </button>
+                      
+                      <div className="h-px bg-slate-800 my-1"></div>
+                      
                       <button onClick={onLogoutClick} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-400 hover:text-red-300 hover:bg-slate-800 rounded-lg">
                         <LogOut className="w-4 h-4" /> Disconnect
                       </button>
