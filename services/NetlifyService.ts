@@ -23,7 +23,6 @@ try {
     console.log("[Netlify DB] Connected successfully.");
     
     // Lazy Initialization: Ensure Tables Exist
-    // Note: In a production app, this should be done via migration scripts, not client-side runtime.
     (async () => {
       try {
         await sql`
@@ -32,7 +31,7 @@ try {
             email TEXT UNIQUE,
             password TEXT,
             name TEXT,
-            plan_id TEXT,
+            plan_id TEXT DEFAULT 'free',
             created_at BIGINT,
             avatar_url TEXT
           );
@@ -40,9 +39,9 @@ try {
         await sql`
           CREATE TABLE IF NOT EXISTS user_data (
             user_id TEXT PRIMARY KEY,
-            analytics JSONB,
-            credits INTEGER,
-            sessions JSONB
+            analytics JSONB DEFAULT '{}'::jsonb,
+            credits INTEGER DEFAULT 0,
+            sessions JSONB DEFAULT '[]'::jsonb
           );
         `;
         console.log("[Netlify DB] Schema verification complete.");
@@ -65,7 +64,6 @@ export const NetlifyService = {
   async login(email: string, password: string): Promise<UserProfile> {
     if (isCloudEnabled && sql) {
       try {
-        // Simple SQL Auth (Note: In production, passwords must be hashed)
         const users = await sql`SELECT * FROM users WHERE email = ${email} AND password = ${password}`;
         
         if (users && users.length > 0) {
@@ -121,7 +119,7 @@ export const NetlifyService = {
           VALUES (${id}, ${email}, ${password}, ${name}, 'free', ${createdAt}, ${avatarUrl})
         `;
 
-        // 2. Initialize Data
+        // 2. Initialize Data - Using stringified JSON to ensure compatibility
         await sql`
           INSERT INTO user_data (user_id, analytics, credits, sessions)
           VALUES (${id}, ${JSON.stringify(DEFAULT_ANALYTICS)}, 0, ${JSON.stringify([])})
@@ -132,7 +130,7 @@ export const NetlifyService = {
         };
       } catch (e: any) {
          console.error("Netlify DB Signup Error", e);
-         if (e.message?.includes('users_email_key')) {
+         if (e.message?.includes('users_email_key') || e.message?.includes('constraint')) {
            throw new Error("Email already registered.");
          }
          throw new Error(e.message || "Cloud Signup Failed");
@@ -172,17 +170,32 @@ export const NetlifyService = {
          const userDataResult = await sql`SELECT * FROM user_data WHERE user_id = ${userId}`;
          const userResult = await sql`SELECT plan_id FROM users WHERE id = ${userId}`;
          
+         const planId = (userResult && userResult.length > 0) ? userResult[0].plan_id : 'free';
+         
          if (userDataResult && userDataResult.length > 0) {
             const data = userDataResult[0];
-            const plan = userResult[0];
+            
+            // Handle potential double-serialization or raw object return
+            let analytics = data.analytics;
+            if (typeof analytics === 'string') {
+                try { analytics = JSON.parse(analytics); } catch(e) {}
+            }
+
+            let sessions = data.sessions;
+            if (typeof sessions === 'string') {
+                try { sessions = JSON.parse(sessions); } catch(e) {}
+            }
+
             return {
-                analytics: data.analytics || DEFAULT_ANALYTICS,
-                sessions: data.sessions || [],
+                analytics: analytics || DEFAULT_ANALYTICS,
+                sessions: Array.isArray(sessions) ? sessions : [],
                 credits: data.credits || 0,
-                planId: plan?.plan_id || 'free'
+                planId: planId
             };
          }
-         return { analytics: DEFAULT_ANALYTICS, sessions: [], credits: 0, planId: 'free' };
+         
+         // If user_data missing but user exists, return defaults
+         return { analytics: DEFAULT_ANALYTICS, sessions: [], credits: 0, planId: planId };
        } catch (e) {
          console.warn("Cloud Sync Error:", e);
          return { analytics: DEFAULT_ANALYTICS, sessions: [], credits: 0, planId: 'free' };
@@ -207,16 +220,31 @@ export const NetlifyService = {
   async saveUserData(userId: string, data: { analytics: UserAnalytics, sessions: ChatSession[], credits: number, planId: string }): Promise<void> {
     if (isCloudEnabled && sql) {
        try {
-         // Upsert User Data
-         await sql`
-            INSERT INTO user_data (user_id, analytics, credits)
-            VALUES (${userId}, ${JSON.stringify(data.analytics)}, ${data.credits})
-            ON CONFLICT (user_id) 
-            DO UPDATE SET analytics = ${JSON.stringify(data.analytics)}, credits = ${data.credits}
-         `;
-         
-         // Update Plan
+         // 1. Update Plan in Users Table
          await sql`UPDATE users SET plan_id = ${data.planId} WHERE id = ${userId}`;
+
+         // 2. Upsert User Data
+         // We explicitly include sessions here to ensure the row is complete if it's a new insert
+         // But on update, we preserve existing sessions if not provided, OR update them if needed. 
+         // Since saveUserData is often called with empty sessions from App.tsx (bad practice but existing), 
+         // we should only update analytics and credits on conflict if we want to preserve sessions stored in DB.
+         
+         // However, correct approach is:
+         // If we are just saving metadata (credits/plan), we don't want to overwrite sessions with [].
+         // The safe way is to separate these or read-modify-write, but for efficiency in SQL:
+         
+         await sql`
+            INSERT INTO user_data (user_id, analytics, credits, sessions)
+            VALUES (${userId}, ${JSON.stringify(data.analytics)}, ${data.credits}, ${JSON.stringify([])})
+            ON CONFLICT (user_id) 
+            DO UPDATE SET 
+              analytics = ${JSON.stringify(data.analytics)}, 
+              credits = ${data.credits}
+         `;
+         // Note: We deliberately DO NOT update 'sessions' in the DO UPDATE clause above 
+         // because App.tsx often passes an empty array for sessions during metadata updates.
+         // Sessions are saved separately via saveUserSessions.
+
        } catch (e) {
          console.error("Cloud Save Error", e);
        }
@@ -224,7 +252,13 @@ export const NetlifyService = {
       // LOCAL SIMULATION
       return new Promise((resolve) => {
         const storageKey = `nexus_data_${userId}`;
-        localStorage.setItem(storageKey, JSON.stringify(data));
+        const existing = JSON.parse(localStorage.getItem(storageKey) || '{}');
+        // Merge to avoid losing sessions if not provided
+        const merged = { ...existing, ...data };
+        if (data.sessions.length === 0 && existing.sessions?.length > 0) {
+            merged.sessions = existing.sessions;
+        }
+        localStorage.setItem(storageKey, JSON.stringify(merged));
         resolve();
       });
     }
@@ -234,9 +268,10 @@ export const NetlifyService = {
     if (isCloudEnabled && sql) {
         try {
             await sql`
-                UPDATE user_data 
-                SET sessions = ${JSON.stringify(sessions)} 
-                WHERE user_id = ${userId}
+                INSERT INTO user_data (user_id, sessions, analytics, credits)
+                VALUES (${userId}, ${JSON.stringify(sessions)}, ${JSON.stringify(DEFAULT_ANALYTICS)}, 0)
+                ON CONFLICT (user_id)
+                DO UPDATE SET sessions = ${JSON.stringify(sessions)}
             `;
         } catch(e) {
             console.error("Cloud Session Save Error", e);
