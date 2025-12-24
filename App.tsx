@@ -25,7 +25,14 @@ export const App: React.FC = () => {
 
   // App State
   const [currentView, setCurrentView] = useState<View>('home');
-  const [user, setUser] = useState<UserProfile | null>(null);
+  
+  // Initialize User from LocalStorage to persist session
+  const [user, setUser] = useState<UserProfile | null>(() => {
+    try {
+        const saved = localStorage.getItem('nexus_auth_user');
+        return saved ? JSON.parse(saved) : null;
+    } catch(e) { return null; }
+  });
   
   // Analytics State (Now synchronized via User)
   const [analytics, setAnalytics] = useState<UserAnalytics>({
@@ -66,6 +73,15 @@ export const App: React.FC = () => {
       }, delay);
     });
   }, []);
+
+  // Persist User Session
+  useEffect(() => {
+    if (user) {
+        localStorage.setItem('nexus_auth_user', JSON.stringify(user));
+    } else {
+        localStorage.removeItem('nexus_auth_user');
+    }
+  }, [user]);
 
   // Load local state initially if not logged in
   useEffect(() => {
