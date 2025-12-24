@@ -308,7 +308,13 @@ export const App: React.FC = () => {
       }
 
       if (user) {
-          const updatedUser = { ...user, enterpriseConfig: config, isEnterpriseOwner: true }; // Activate ownership on save
+          // Explicitly update planId here too so it saves to the 'users' table column correctly immediately
+          const updatedUser = { 
+              ...user, 
+              enterpriseConfig: config, 
+              isEnterpriseOwner: true, 
+              planId: 'enterprise-custom' 
+          };
           setUser(updatedUser);
           saveAllToCloud(updatedUser);
       }
@@ -343,7 +349,7 @@ export const App: React.FC = () => {
           setActiveProfileMode('personal');
           
           if (user) {
-              const updatedUser = { ...user, enterpriseConfig: undefined, teamMembers: [], isEnterpriseOwner: false };
+              const updatedUser = { ...user, enterpriseConfig: undefined, teamMembers: [], isEnterpriseOwner: false, planId: 'free' };
               setUser(updatedUser);
               saveAllToCloud(updatedUser);
           }

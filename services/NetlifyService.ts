@@ -133,7 +133,7 @@ export const NetlifyService = {
         // 2. Initialize Data
         await sql`
           INSERT INTO user_data (user_id, analytics, credits, sessions, enterprise_data)
-          VALUES (${id}, ${JSON.stringify(DEFAULT_ANALYTICS)}, 0, ${JSON.stringify([])}, '{}'::jsonb)
+          VALUES (${id}, ${JSON.stringify(DEFAULT_ANALYTICS)}::jsonb, 0, ${JSON.stringify([])}::jsonb, '{}'::jsonb)
         `;
 
         return {
@@ -176,9 +176,19 @@ export const NetlifyService = {
   },
 
   async syncUserData(userId: string): Promise<UserDataPayload> {
+    // Robust parsing that handles double-stringification (a common issue with Postgres JSONB + Drivers)
     const parse = (val: any) => {
+        if (!val) return null;
+        if (typeof val === 'object') return val; // Already an object
         if (typeof val === 'string') {
-            try { return JSON.parse(val); } catch(e) { return val; }
+            try { 
+                const parsed = JSON.parse(val);
+                // Check if the result is still a string (double encoded)
+                if (typeof parsed === 'string') {
+                    try { return JSON.parse(parsed); } catch { return parsed; }
+                }
+                return parsed;
+            } catch(e) { return val; } // Return original if parse fails
         }
         return val;
     };
@@ -195,7 +205,7 @@ export const NetlifyService = {
             const data = userDataResult[0];
             const analytics = parse(data.analytics);
             const sessions = parse(data.sessions);
-            const enterpriseData = parse(data.enterprise_data) || {}; // Handle null gracefully
+            const enterpriseData = parse(data.enterprise_data) || {}; 
 
             let config = enterpriseData.config;
             let members = enterpriseData.members || [];
@@ -204,6 +214,7 @@ export const NetlifyService = {
             // If I am NOT an owner, check if I am a member of someone else's team
             if (!isOwner && userEmail) {
                 // Check if my email is in ANY user's members list
+                // We construct the query carefully for JSONB containment
                 const ownerResult = await sql`
                     SELECT enterprise_data 
                     FROM user_data 
@@ -213,9 +224,10 @@ export const NetlifyService = {
                 
                 if (ownerResult && ownerResult.length > 0) {
                     const ownerData = parse(ownerResult[0].enterprise_data);
-                    config = ownerData.config; // Inherit config
-                    // I don't inherit the members list (I can't see other members), just the config
-                    isOwner = false; 
+                    if (ownerData && ownerData.config) {
+                        config = ownerData.config; // Inherit config
+                        isOwner = false; 
+                    }
                 }
             }
 
@@ -288,12 +300,6 @@ export const NetlifyService = {
          await sql`UPDATE users SET plan_id = ${data.planId} WHERE id = ${userId}`;
 
          // 2. Prepare Enterprise Data
-         // IMPORTANT: Safeguard config persistence.
-         // Save config if:
-         // - User is explicitly marked as owner (data.isEnterpriseOwner === true)
-         // - OR Config exists and user is NOT explicitly marked as a member (backward compat or safety)
-         // If User is a member (isEnterpriseOwner === false), we explicitly set config to null for their own record.
-
          let enterprisePayload: any = { members: data.teamMembers || [] };
          
          if (data.isEnterpriseOwner === true || (data.enterpriseConfig && data.isEnterpriseOwner !== false)) {
@@ -303,14 +309,21 @@ export const NetlifyService = {
          }
 
          // 3. Upsert User Data
+         // KEY FIX: Use ::jsonb casting to ensure the stringified JSON is treated as a JSON object by Postgres
          await sql`
             INSERT INTO user_data (user_id, analytics, credits, sessions, enterprise_data)
-            VALUES (${userId}, ${JSON.stringify(data.analytics)}, ${data.credits}, ${JSON.stringify([])}, ${JSON.stringify(enterprisePayload)})
+            VALUES (
+              ${userId}, 
+              ${JSON.stringify(data.analytics)}::jsonb, 
+              ${data.credits}, 
+              ${JSON.stringify([])}::jsonb, 
+              ${JSON.stringify(enterprisePayload)}::jsonb
+            )
             ON CONFLICT (user_id) 
             DO UPDATE SET 
-              analytics = ${JSON.stringify(data.analytics)}, 
+              analytics = ${JSON.stringify(data.analytics)}::jsonb, 
               credits = ${data.credits},
-              enterprise_data = ${JSON.stringify(enterprisePayload)}
+              enterprise_data = ${JSON.stringify(enterprisePayload)}::jsonb
          `;
        } catch (e) {
          console.error("Cloud Save Error", e);
@@ -347,9 +360,9 @@ export const NetlifyService = {
         try {
             await sql`
                 INSERT INTO user_data (user_id, sessions, analytics, credits)
-                VALUES (${userId}, ${JSON.stringify(sessions)}, ${JSON.stringify(DEFAULT_ANALYTICS)}, 0)
+                VALUES (${userId}, ${JSON.stringify(sessions)}::jsonb, ${JSON.stringify(DEFAULT_ANALYTICS)}::jsonb, 0)
                 ON CONFLICT (user_id)
-                DO UPDATE SET sessions = ${JSON.stringify(sessions)}
+                DO UPDATE SET sessions = ${JSON.stringify(sessions)}::jsonb
             `;
         } catch(e) {
             console.error("Cloud Session Save Error", e);
