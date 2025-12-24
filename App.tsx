@@ -441,7 +441,9 @@ export const App: React.FC = () => {
   }
 
   // Calculate Title based on Mode
-  const displayTitle = activeProfileMode === 'enterprise' ? (user?.enterpriseConfig?.teamName || "Enterprise") : undefined;
+  const displayTitle = activeProfileMode === 'enterprise' 
+    ? (user?.enterpriseConfig?.teamName || "Enterprise") 
+    : undefined;
 
   return (
     <div className="flex flex-col min-h-screen bg-slate-950 text-white selection:bg-nexus-500 selection:text-white">

@@ -45,6 +45,8 @@ try {
             enterprise_data JSONB DEFAULT '{}'::jsonb
           );
         `;
+        // Create index for faster member lookups
+        await sql`CREATE INDEX IF NOT EXISTS idx_user_data_enterprise_members ON user_data USING gin (enterprise_data)`;
         console.log("[Netlify DB] Schema verification complete.");
       } catch (err) {
         console.error("[Netlify DB] Schema verification failed:", err);
@@ -73,9 +75,10 @@ export const NetlifyService = {
   isCloudActive: () => isCloudEnabled,
 
   async login(email: string, password: string): Promise<UserProfile> {
+    const cleanEmail = email.toLowerCase().trim();
     if (isCloudEnabled && sql) {
       try {
-        const users = await sql`SELECT * FROM users WHERE email = ${email} AND password = ${password}`;
+        const users = await sql`SELECT * FROM users WHERE email = ${cleanEmail} AND password = ${password}`;
         
         if (users && users.length > 0) {
           const u = users[0];
@@ -100,7 +103,7 @@ export const NetlifyService = {
     return new Promise((resolve, reject) => {
       setTimeout(() => {
         const users = JSON.parse(localStorage.getItem('nexus_cloud_users') || '[]');
-        const user = users.find((u: any) => u.email === email && u.password === password);
+        const user = users.find((u: any) => u.email === cleanEmail && u.password === password);
         if (user) {
           resolve({
             id: user.id,
@@ -118,6 +121,7 @@ export const NetlifyService = {
   },
 
   async signup(email: string, password: string, name: string): Promise<UserProfile> {
+    const cleanEmail = email.toLowerCase().trim();
     if (isCloudEnabled && sql) {
       try {
         const id = `usr_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -127,7 +131,7 @@ export const NetlifyService = {
         // 1. Create User
         await sql`
           INSERT INTO users (id, email, password, name, plan_id, created_at, avatar_url)
-          VALUES (${id}, ${email}, ${password}, ${name}, 'free', ${createdAt}, ${avatarUrl})
+          VALUES (${id}, ${cleanEmail}, ${password}, ${name}, 'free', ${createdAt}, ${avatarUrl})
         `;
 
         // 2. Initialize Data
@@ -137,7 +141,7 @@ export const NetlifyService = {
         `;
 
         return {
-          id, email, name, planId: 'free', createdAt, avatarUrl
+          id, email: cleanEmail, name, planId: 'free', createdAt, avatarUrl
         };
       } catch (e: any) {
          console.error("Netlify DB Signup Error", e);
@@ -154,7 +158,7 @@ export const NetlifyService = {
         const users = JSON.parse(localStorage.getItem('nexus_cloud_users') || '[]');
         const newUser = {
           id: `usr_${Date.now()}`,
-          email,
+          email: cleanEmail,
           password,
           name,
           planId: 'free',
@@ -176,19 +180,17 @@ export const NetlifyService = {
   },
 
   async syncUserData(userId: string): Promise<UserDataPayload> {
-    // Robust parsing that handles double-stringification (a common issue with Postgres JSONB + Drivers)
     const parse = (val: any) => {
         if (!val) return null;
-        if (typeof val === 'object') return val; // Already an object
+        if (typeof val === 'object') return val;
         if (typeof val === 'string') {
             try { 
                 const parsed = JSON.parse(val);
-                // Check if the result is still a string (double encoded)
                 if (typeof parsed === 'string') {
                     try { return JSON.parse(parsed); } catch { return parsed; }
                 }
                 return parsed;
-            } catch(e) { return val; } // Return original if parse fails
+            } catch(e) { return val; }
         }
         return val;
     };
@@ -199,7 +201,8 @@ export const NetlifyService = {
          const userResult = await sql`SELECT plan_id, email FROM users WHERE id = ${userId}`;
          
          const planId = (userResult && userResult.length > 0) ? userResult[0].plan_id : 'free';
-         const userEmail = (userResult && userResult.length > 0) ? userResult[0].email : '';
+         const rawEmail = (userResult && userResult.length > 0) ? userResult[0].email : '';
+         const userEmail = rawEmail ? rawEmail.toLowerCase().trim() : '';
 
          if (userDataResult && userDataResult.length > 0) {
             const data = userDataResult[0];
@@ -209,16 +212,17 @@ export const NetlifyService = {
 
             let config = enterpriseData.config;
             let members = enterpriseData.members || [];
-            let isOwner = !!config;
+            let isOwner = !!config; 
 
-            // If I am NOT an owner, check if I am a member of someone else's team
+            // If I am NOT an owner (no config in my row), check if I am a member of someone else's team
             if (!isOwner && userEmail) {
-                // Check if my email is in ANY user's members list
-                // We construct the query carefully for JSONB containment
+                // IMPORTANT: Ensure userEmail is strictly lowercased for comparison
+                const targetMemberSubset = JSON.stringify({ members: [userEmail] });
+                
                 const ownerResult = await sql`
                     SELECT enterprise_data 
                     FROM user_data 
-                    WHERE enterprise_data->'members' @> ${JSON.stringify([userEmail])}::jsonb
+                    WHERE enterprise_data @> ${targetMemberSubset}::jsonb
                     LIMIT 1
                 `;
                 
@@ -251,26 +255,24 @@ export const NetlifyService = {
       // LOCAL SIMULATION
       return new Promise((resolve) => {
         setTimeout(() => {
-          // 1. Get My Data
           const storageKey = `nexus_data_${userId}`;
           const myData = JSON.parse(localStorage.getItem(storageKey) || '{}');
-          
-          // 2. Get My Email (Need to look up in users list)
           const users = JSON.parse(localStorage.getItem('nexus_cloud_users') || '[]');
           const me = users.find((u: any) => u.id === userId);
-          const myEmail = me ? me.email : '';
+          const myEmail = me ? me.email.toLowerCase() : '';
 
           let config = myData.enterpriseConfig;
           let members = myData.teamMembers || [];
           let isOwner = !!config;
 
-          // 3. If I am not owner, search all other local users to see if I am in their team
           if (!isOwner && myEmail) {
              for (let i = 0; i < localStorage.length; i++) {
                 const key = localStorage.key(i);
                 if (key && key.startsWith('nexus_data_') && key !== storageKey) {
                     const otherData = JSON.parse(localStorage.getItem(key) || '{}');
-                    if (otherData.teamMembers && Array.isArray(otherData.teamMembers) && otherData.teamMembers.includes(myEmail)) {
+                    // Check inclusion case-insensitively
+                    const otherMembers = (otherData.teamMembers || []).map((m: string) => m.toLowerCase());
+                    if (otherMembers.includes(myEmail)) {
                         config = otherData.enterpriseConfig;
                         isOwner = false;
                         break;
@@ -300,30 +302,60 @@ export const NetlifyService = {
          await sql`UPDATE users SET plan_id = ${data.planId} WHERE id = ${userId}`;
 
          // 2. Prepare Enterprise Data
-         let enterprisePayload: any = { members: data.teamMembers || [] };
+         const normalizedMembers = (data.teamMembers || []).map(m => m.toLowerCase().trim());
+         let enterprisePayload: any = { members: normalizedMembers };
          
-         if (data.isEnterpriseOwner === true || (data.enterpriseConfig && data.isEnterpriseOwner !== false)) {
+         // 3. SAFE MERGE STRATEGY
+         // If isEnterpriseOwner is FALSE, we intentionally delete the config (User canceled).
+         // If isEnterpriseOwner is TRUE, we save the new config (User updated).
+         // If isEnterpriseOwner is UNDEFINED (Stale update?), we MUST fetch existing config to prevent deletion.
+         
+         if (data.isEnterpriseOwner === true) {
+             // Explicit Update/Create
              enterprisePayload.config = data.enterpriseConfig;
+         } else if (data.isEnterpriseOwner === false) {
+             // Explicit Cancel
+             enterprisePayload.config = null;
          } else {
-             enterprisePayload.config = null; 
+             // Undefined/Stale State: Fetch existing to preserve it
+             try {
+                const existing = await sql`SELECT enterprise_data FROM user_data WHERE user_id = ${userId}`;
+                if (existing && existing.length > 0) {
+                    const existingData = existing[0].enterprise_data;
+                    if (typeof existingData === 'string') {
+                         try { enterprisePayload.config = JSON.parse(existingData).config; } catch {}
+                    } else if (existingData) {
+                         enterprisePayload.config = existingData.config;
+                    }
+                }
+             } catch(e) {
+                console.warn("Failed to fetch existing config for merge, proceeding cautiously.", e);
+             }
+             
+             // Fallback: If we still don't have config but have it in payload, use it
+             if (!enterprisePayload.config && data.enterpriseConfig) {
+                 enterprisePayload.config = data.enterpriseConfig;
+             }
          }
 
-         // 3. Upsert User Data
-         // KEY FIX: Use ::jsonb casting to ensure the stringified JSON is treated as a JSON object by Postgres
+         const analyticsJson = JSON.stringify(data.analytics);
+         const enterpriseJson = JSON.stringify(enterprisePayload);
+
+         // 4. Upsert User Data
          await sql`
             INSERT INTO user_data (user_id, analytics, credits, sessions, enterprise_data)
             VALUES (
               ${userId}, 
-              ${JSON.stringify(data.analytics)}::jsonb, 
+              ${analyticsJson}::jsonb, 
               ${data.credits}, 
-              ${JSON.stringify([])}::jsonb, 
-              ${JSON.stringify(enterprisePayload)}::jsonb
+              '[]'::jsonb, 
+              ${enterpriseJson}::jsonb
             )
             ON CONFLICT (user_id) 
             DO UPDATE SET 
-              analytics = ${JSON.stringify(data.analytics)}::jsonb, 
+              analytics = ${analyticsJson}::jsonb, 
               credits = ${data.credits},
-              enterprise_data = ${JSON.stringify(enterprisePayload)}::jsonb
+              enterprise_data = ${enterpriseJson}::jsonb
          `;
        } catch (e) {
          console.error("Cloud Save Error", e);
@@ -334,11 +366,14 @@ export const NetlifyService = {
         const storageKey = `nexus_data_${userId}`;
         const existing = JSON.parse(localStorage.getItem(storageKey) || '{}');
         
-        // Handle Member Logic for Local
-        let configToSave = data.enterpriseConfig;
-        if (data.isEnterpriseOwner === false) {
-            configToSave = undefined; // Do not save inherited config to local storage persistence for self
+        let configToSave = existing.enterpriseConfig; // Default to existing
+        
+        if (data.isEnterpriseOwner === true) {
+            configToSave = data.enterpriseConfig;
+        } else if (data.isEnterpriseOwner === false) {
+            configToSave = undefined;
         }
+        // If undefined, we keep existing configToSave
 
         const merged = { 
             ...existing, 
@@ -346,6 +381,7 @@ export const NetlifyService = {
             enterpriseConfig: configToSave 
         };
 
+        // Don't overwrite sessions with empty if we passed empty
         if (data.sessions.length === 0 && existing.sessions?.length > 0) {
             merged.sessions = existing.sessions;
         }
@@ -358,11 +394,12 @@ export const NetlifyService = {
   async saveUserSessions(userId: string, sessions: ChatSession[]): Promise<void> {
     if (isCloudEnabled && sql) {
         try {
+            const sessionsJson = JSON.stringify(sessions);
             await sql`
                 INSERT INTO user_data (user_id, sessions, analytics, credits)
-                VALUES (${userId}, ${JSON.stringify(sessions)}::jsonb, ${JSON.stringify(DEFAULT_ANALYTICS)}::jsonb, 0)
+                VALUES (${userId}, ${sessionsJson}::jsonb, '{}'::jsonb, 0)
                 ON CONFLICT (user_id)
-                DO UPDATE SET sessions = ${JSON.stringify(sessions)}::jsonb
+                DO UPDATE SET sessions = ${sessionsJson}::jsonb
             `;
         } catch(e) {
             console.error("Cloud Session Save Error", e);

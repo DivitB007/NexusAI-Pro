@@ -81,13 +81,16 @@ export const EnterpriseBuilder: React.FC<EnterpriseBuilderProps> = ({ onClose, o
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
+    // Validate Team Name - Provide default if empty to ensure DB persistence
+    const finalTeamName = teamName.trim() || "Enterprise";
+
     // If updating, no code needed (or simplified check)
     if (isUpdateMode) {
         onActivate({
             allowedModels: selectedModels,
             codingCapability: codingTier,
             totalPrice: totalPrice,
-            teamName: teamName.trim() || undefined,
+            teamName: finalTeamName,
             removeBranding,
             securityLevel,
             companyContext: companyContext.trim() || undefined
@@ -101,7 +104,7 @@ export const EnterpriseBuilder: React.FC<EnterpriseBuilderProps> = ({ onClose, o
         allowedModels: selectedModels,
         codingCapability: codingTier,
         totalPrice: totalPrice,
-        teamName: teamName.trim() || undefined,
+        teamName: finalTeamName,
         removeBranding,
         securityLevel,
         companyContext: companyContext.trim() || undefined
@@ -115,7 +118,7 @@ export const EnterpriseBuilder: React.FC<EnterpriseBuilderProps> = ({ onClose, o
       e.preventDefault();
       if (!newMemberEmail || !newMemberEmail.includes('@')) return;
       if (onAddMember) {
-          onAddMember(newMemberEmail);
+          onAddMember(newMemberEmail.toLowerCase().trim()); // Normalize email
           setNewMemberEmail('');
       }
   };
