@@ -201,9 +201,7 @@ export const App: React.FC = () => {
   };
 
   const handleDeductCredits = (amount: number) => {
-    // If enterprise mode, we assume unlimited or separate billing, so NO credit deduction from personal account
-    if (activeProfileMode === 'enterprise') return;
-
+    // Credits now work in Enterprise Mode as well (deducted from user balance)
     setCredits(prev => {
         const newVal = Math.max(0, prev - amount);
         if (user) {
@@ -304,8 +302,28 @@ export const App: React.FC = () => {
       setCurrentView('chat');
   };
 
+  const handleAddTeamMember = (email: string) => {
+      if (!user) return;
+      const currentMembers = user.teamMembers || [];
+      if (currentMembers.includes(email)) return;
+      
+      const updatedMembers = [...currentMembers, email];
+      const updatedUser = { ...user, teamMembers: updatedMembers };
+      setUser(updatedUser);
+      saveAllToCloud(updatedUser);
+      alert(`Seat added for ${email}. $5 charged to method on file.`);
+  };
+
+  const handleRemoveTeamMember = (email: string) => {
+      if (!user) return;
+      const updatedMembers = (user.teamMembers || []).filter(e => e !== email);
+      const updatedUser = { ...user, teamMembers: updatedMembers };
+      setUser(updatedUser);
+      saveAllToCloud(updatedUser);
+  };
+
   const handleCancelEnterprise = () => {
-      if (window.confirm("Are you sure you want to cancel your Enterprise Suite? This will remove all configurations and team access.")) {
+      if (window.confirm("Are you sure you want to cancel your Enterprise Suite? This will remove all configurations.")) {
           setCustomPlan(undefined);
           setSelectedPlan('free');
           setActiveProfileMode('personal');
@@ -325,26 +343,6 @@ export const App: React.FC = () => {
            // Also clear trial if any
            setTrialExpiry(null);
        }
-  };
-
-  const handleAddTeamMember = (email: string) => {
-      if (!user) return;
-      const currentMembers = user.teamMembers || [];
-      if (currentMembers.includes(email)) return;
-      
-      const updatedMembers = [...currentMembers, email];
-      const updatedUser = { ...user, teamMembers: updatedMembers };
-      setUser(updatedUser);
-      saveAllToCloud(updatedUser);
-      alert(`Seat added for ${email}. $5 charged to method on file.`);
-  };
-
-  const handleRemoveTeamMember = (email: string) => {
-      if (!user) return;
-      const updatedMembers = (user.teamMembers || []).filter(e => e !== email);
-      const updatedUser = { ...user, teamMembers: updatedMembers };
-      setUser(updatedUser);
-      saveAllToCloud(updatedUser);
   };
 
   const getIconForPlan = (index: number) => {
@@ -427,7 +425,7 @@ export const App: React.FC = () => {
         onRedeemClick={() => setIsRedeemOpen(true)} 
         onAddCreditsClick={() => setIsCreditModalOpen(true)} 
         trialExpiry={trialExpiry} 
-        credits={activeProfileMode === 'enterprise' ? 999999 : credits} // Enterprise has infinite/pooled credits logic visually
+        credits={credits} 
         planName={activeProfileMode === 'enterprise' ? 'Enterprise' : SUBSCRIPTION_PLANS.find(p => p.id === selectedPlan)?.name} 
         customTitle={displayTitle} 
         user={user}

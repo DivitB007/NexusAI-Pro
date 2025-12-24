@@ -36,7 +36,7 @@ export const EnterpriseBuilder: React.FC<EnterpriseBuilderProps> = ({ onClose, o
   const [companyContext, setCompanyContext] = useState(existingConfig?.companyContext || '');
   const [removeBranding, setRemoveBranding] = useState(existingConfig?.removeBranding || false);
   const [securityLevel, setSecurityLevel] = useState<SecurityLevel>(existingConfig?.securityLevel || 'none');
-
+  
   // Team Management State
   const [newMemberEmail, setNewMemberEmail] = useState('');
 
@@ -130,7 +130,7 @@ export const EnterpriseBuilder: React.FC<EnterpriseBuilderProps> = ({ onClose, o
               </div>
               <div>
                 <h2 className="text-xl font-bold text-white">Enterprise Suite {isUpdateMode ? 'Manager' : 'Builder'}</h2>
-                <p className="text-nexus-400 font-mono text-xs">{isUpdateMode ? 'Update Configuration & Team' : 'Create your custom AI infrastructure'}</p>
+                <p className="text-nexus-400 font-mono text-xs">{isUpdateMode ? 'Update Configuration' : 'Create your custom AI infrastructure'}</p>
               </div>
             </div>
             <button onClick={onClose} className="text-slate-400 hover:text-white">
