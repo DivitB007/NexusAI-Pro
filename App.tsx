@@ -123,7 +123,8 @@ export const App: React.FC = () => {
         setUser(prev => prev ? { 
             ...prev, 
             enterpriseConfig: data.enterpriseConfig, 
-            teamMembers: data.teamMembers 
+            teamMembers: data.teamMembers,
+            isEnterpriseOwner: data.isEnterpriseOwner
         } : null);
         
         if (data.enterpriseConfig) {
@@ -145,7 +146,8 @@ export const App: React.FC = () => {
               credits,
               planId: selectedPlan,
               enterpriseConfig: u.enterpriseConfig,
-              teamMembers: u.teamMembers
+              teamMembers: u.teamMembers,
+              isEnterpriseOwner: u.isEnterpriseOwner
           });
       }
   };
@@ -173,7 +175,8 @@ export const App: React.FC = () => {
                credits,
                planId: selectedPlan,
                enterpriseConfig: user.enterpriseConfig,
-               teamMembers: user.teamMembers
+               teamMembers: user.teamMembers,
+               isEnterpriseOwner: user.isEnterpriseOwner
            });
        }
        return newStats;
@@ -190,7 +193,8 @@ export const App: React.FC = () => {
                credits: newVal,
                planId: selectedPlan,
                enterpriseConfig: user.enterpriseConfig,
-               teamMembers: user.teamMembers
+               teamMembers: user.teamMembers,
+               isEnterpriseOwner: user.isEnterpriseOwner
            });
         } else {
             localStorage.setItem('nexus_credits', newVal.toString());
@@ -211,7 +215,8 @@ export const App: React.FC = () => {
                credits: newVal,
                planId: selectedPlan,
                enterpriseConfig: user.enterpriseConfig,
-               teamMembers: user.teamMembers
+               teamMembers: user.teamMembers,
+               isEnterpriseOwner: user.isEnterpriseOwner
            });
         } else {
             localStorage.setItem('nexus_credits', newVal.toString());
@@ -294,7 +299,7 @@ export const App: React.FC = () => {
       }
 
       if (user) {
-          const updatedUser = { ...user, enterpriseConfig: config };
+          const updatedUser = { ...user, enterpriseConfig: config, isEnterpriseOwner: true }; // Activate ownership on save
           setUser(updatedUser);
           saveAllToCloud(updatedUser);
       }
@@ -329,7 +334,7 @@ export const App: React.FC = () => {
           setActiveProfileMode('personal');
           
           if (user) {
-              const updatedUser = { ...user, enterpriseConfig: undefined, teamMembers: [] };
+              const updatedUser = { ...user, enterpriseConfig: undefined, teamMembers: [], isEnterpriseOwner: false };
               setUser(updatedUser);
               saveAllToCloud(updatedUser);
           }
@@ -435,7 +440,11 @@ export const App: React.FC = () => {
         onSwitchProfileMode={() => setActiveProfileMode(prev => prev === 'personal' ? 'enterprise' : 'personal')}
         onManageSubscription={() => {
             if (activeProfileMode === 'enterprise') {
-                setIsEnterpriseBuilderOpen(true);
+                if (user?.isEnterpriseOwner) {
+                    setIsEnterpriseBuilderOpen(true);
+                } else {
+                    alert("Only the Enterprise Owner can manage this subscription and team.");
+                }
             } else {
                 // If personal, show standard pricing but maybe a "Manage" modal in future. For now, navigate to pricing.
                 // We'll open a confirm dialog to cancel if they want.

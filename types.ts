@@ -20,6 +20,7 @@ export interface UserProfile {
   // Enterprise Fields
   enterpriseConfig?: CustomPlanConfig;
   teamMembers?: string[]; // List of emails
+  isEnterpriseOwner?: boolean; // True if they pay for it, False if they are an invited member
 }
 
 export interface UserAnalytics {
