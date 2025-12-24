@@ -30,7 +30,16 @@ export const App: React.FC = () => {
   const [user, setUser] = useState<UserProfile | null>(() => {
     try {
         const saved = localStorage.getItem('nexus_auth_user');
-        return saved ? JSON.parse(saved) : null;
+        if (saved) {
+             const u = JSON.parse(saved);
+             // Fix for existing users who created enterprise before the ownership flag existed
+             // If they have a config but isEnterpriseOwner is undefined, we assume they own it.
+             if (u.enterpriseConfig && u.isEnterpriseOwner === undefined) {
+                 u.isEnterpriseOwner = true;
+             }
+             return u;
+        }
+        return null;
     } catch(e) { return null; }
   });
 

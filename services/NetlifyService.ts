@@ -195,7 +195,7 @@ export const NetlifyService = {
             const data = userDataResult[0];
             const analytics = parse(data.analytics);
             const sessions = parse(data.sessions);
-            const enterpriseData = parse(data.enterprise_data || {});
+            const enterpriseData = parse(data.enterprise_data) || {}; // Handle null gracefully
 
             let config = enterpriseData.config;
             let members = enterpriseData.members || [];
@@ -204,7 +204,6 @@ export const NetlifyService = {
             // If I am NOT an owner, check if I am a member of someone else's team
             if (!isOwner && userEmail) {
                 // Check if my email is in ANY user's members list
-                // We use Postgres JSONB operator ? to check for existence of key/string in array
                 const ownerResult = await sql`
                     SELECT enterprise_data 
                     FROM user_data 
@@ -289,23 +288,17 @@ export const NetlifyService = {
          await sql`UPDATE users SET plan_id = ${data.planId} WHERE id = ${userId}`;
 
          // 2. Prepare Enterprise Data
-         // IMPORTANT: Only save enterprise config if I am the OWNER.
-         // If I am a member, my 'enterpriseConfig' is just a view, I shouldn't overwrite my own data with it 
-         // unless I am saving my OWN separate config. 
-         // However, for simplicity here, we rely on the App to pass `undefined` for config if I am just a member trying to save stats.
-         // BUT `saveAllToCloud` passes `user.enterpriseConfig`.
-         // Refinement: The App State `user` object holds the *viewable* config.
-         // We need to know if we should persist it.
-         // If `data.isEnterpriseOwner` is false, we should NOT save the `enterpriseConfig` to DB for THIS user, 
-         // effectively keeping their 'config' null in DB, so they continue to inherit it.
+         // IMPORTANT: Safeguard config persistence.
+         // Save config if:
+         // - User is explicitly marked as owner (data.isEnterpriseOwner === true)
+         // - OR Config exists and user is NOT explicitly marked as a member (backward compat or safety)
+         // If User is a member (isEnterpriseOwner === false), we explicitly set config to null for their own record.
 
-         let enterprisePayload: any = { members: data.teamMembers };
-         if (data.isEnterpriseOwner) {
+         let enterprisePayload: any = { members: data.teamMembers || [] };
+         
+         if (data.isEnterpriseOwner === true || (data.enterpriseConfig && data.isEnterpriseOwner !== false)) {
              enterprisePayload.config = data.enterpriseConfig;
          } else {
-             // If I'm not owner, I don't save the config to MY record.
-             // I only save my members list (which should be empty usually)
-             // or any *personal* enterprise config if I had one (but here we assume one active config)
              enterprisePayload.config = null; 
          }
 
