@@ -378,6 +378,12 @@ export const App: React.FC = () => {
     if (activeProfileMode === 'enterprise') {
         effectivePlanId = 'enterprise-custom';
         effectiveCustomPlan = user?.enterpriseConfig || customPlan;
+        
+        // Critical Safety: If we think we are enterprise but have no config (e.g. sync fail), fallback to free
+        // to prevent the ChatInterface from crashing (White/Black screen of death)
+        if (!effectiveCustomPlan) {
+            effectivePlanId = 'free';
+        }
     } else {
         // Personal Mode: Ignore Enterprise Config
         effectiveCustomPlan = undefined;

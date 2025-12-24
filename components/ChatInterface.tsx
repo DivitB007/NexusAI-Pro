@@ -46,14 +46,26 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedPlanId, cu
   const RATE_LIMIT_MAX_REQUESTS = 40;
 
   const isCustomPlan = selectedPlanId === 'enterprise-custom';
+  
+  // Safe Fallback for Enterprise Config to prevent crash if data is missing
+  const safeConfig = customPlanConfig || {
+      allowedModels: ['nexus-0'],
+      codingCapability: 'none',
+      securityLevel: 'none',
+      companyContext: '',
+      teamName: 'Enterprise',
+      totalPrice: 0,
+      removeBranding: false
+  };
+
   const currentPlan = isCustomPlan 
     ? { 
         id: 'enterprise-custom', 
         name: 'Enterprise Custom', 
-        allowedModels: customPlanConfig?.allowedModels || [], 
-        codingCapability: customPlanConfig?.codingCapability || 'none',
+        allowedModels: safeConfig.allowedModels.length > 0 ? safeConfig.allowedModels : ['nexus-0'], 
+        codingCapability: safeConfig.codingCapability || 'none',
         isGodModeEligible: true,
-        isVaultEligible: customPlanConfig?.securityLevel === 'advance' || customPlanConfig?.securityLevel === 'high',
+        isVaultEligible: safeConfig.securityLevel === 'advance' || safeConfig.securityLevel === 'high',
         imageLimit: 'unlimited',
         voiceCapability: 'neural',
         canExport: true,
@@ -61,10 +73,10 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedPlanId, cu
       }
     : SUBSCRIPTION_PLANS.find(p => p.id === selectedPlanId) || SUBSCRIPTION_PLANS[0];
   
-  const displayBotName = customPlanConfig?.teamName || botName;
-  const hasAgentContext = !!customPlanConfig?.companyContext;
+  const displayBotName = safeConfig.teamName || botName;
+  const hasAgentContext = !!safeConfig.companyContext;
   
-  const securityLevel = isCustomPlan ? customPlanConfig?.securityLevel : (currentPlan.isVaultEligible ? 'high' : 'low');
+  const securityLevel = isCustomPlan ? safeConfig.securityLevel : (currentPlan.isVaultEligible ? 'high' : 'low');
   
   const getFaviconUrl = (inputUrl: string) => {
     try {
@@ -74,10 +86,16 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedPlanId, cu
     } catch (e) { return null; }
   };
 
-  const agentLogoUrl = (isCustomPlan && hasAgentContext && customPlanConfig?.companyContext) 
-    ? getFaviconUrl(customPlanConfig.companyContext) : null;
+  const agentLogoUrl = (isCustomPlan && hasAgentContext && safeConfig.companyContext) 
+    ? getFaviconUrl(safeConfig.companyContext) : null;
   
   let allowedModels: AIModel[] = AI_MODELS.filter(m => currentPlan.allowedModels.includes(m.id));
+  
+  // SAFETY: Ensure at least one model exists
+  if (allowedModels.length === 0) {
+      allowedModels = [AI_MODELS[0]]; 
+  }
+
   if (isCustomPlan && hasAgentContext) {
     const agentModel: AIModel = {
       id: 'nexus-agent',
@@ -108,7 +126,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedPlanId, cu
       messages: [{
         id: 'welcome',
         role: 'model',
-        text: `Greetings. I am ${displayBotName} v${APP_VERSION}. ${hasAgentContext ? "Connected to " + customPlanConfig?.companyContext + "." : "Engine initialized."}`,
+        text: `Greetings. I am ${displayBotName} v${APP_VERSION}. ${hasAgentContext ? "Connected to " + safeConfig.companyContext + "." : "Engine initialized."}`,
         timestamp: Date.now()
       }],
       modelId: getDefaultModelId(),
@@ -128,8 +146,6 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedPlanId, cu
   // Effect: Sync sessions TO Cloud (or LocalStorage) when they change
   useEffect(() => {
     if (user) {
-        // Debounce or save immediately. For simplicity: Immediate save via async background.
-        // We do NOT await this to avoid blocking UI.
         NetlifyService.saveUserSessions(user.id, sessions);
     } else {
         localStorage.setItem('nexus_v2_sessions', JSON.stringify(sessions));
@@ -166,6 +182,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedPlanId, cu
   const recognitionRef = useRef<any>(null);
   
   const currentSession = sessions.find(s => s.id === currentSessionId);
+  // Robust Model selection that never returns undefined
   const currentModelId = (currentSession && allowedModels.some(m => m.id === currentSession.modelId)) ? currentSession.modelId : getDefaultModelId();
   const currentModel = allowedModels.find(m => m.id === currentModelId) || allowedModels[0];
   const currentTone = currentSession?.tone || 'balanced';
@@ -230,7 +247,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedPlanId, cu
 
       const config: any = { systemInstruction: systemPrompt };
 
-      if (currentModel.isThinking) {
+      if (currentModel && currentModel.isThinking) {
         config.thinkingConfig = { thinkingBudget: isGodMode ? 4096 : (currentModel.id === 'nexus-0-2' ? 2048 : 1024) }; 
       }
 
@@ -380,7 +397,6 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedPlanId, cu
     const userText = input;
     const currentAttachment = attachment;
     
-    // Approximate Token Calculation (4 chars = 1 token)
     const estimatedInputTokens = userText.length / 4;
     
     const userMessage: Message = {
@@ -428,7 +444,6 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedPlanId, cu
         }
       }
       
-      // Live Analytics Update
       if (onUsageUpdate) {
           const estimatedOutputTokens = fullText.length / 4;
           const totalTokens = Math.ceil(estimatedInputTokens + estimatedOutputTokens);
@@ -539,7 +554,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedPlanId, cu
              <div className="flex flex-col items-center justify-center h-full text-center text-slate-500">
               <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-4 ${isGodMode ? 'bg-amber-500/10' : 'bg-nexus-500/10'} animate-float`}><Bot className={`w-8 h-8 ${isGodMode ? 'text-amber-500' : 'text-nexus-400'}`} /></div>
               <h3 className={`text-2xl font-bold mb-2 ${isGodMode ? 'god-mode-gradient' : 'text-white'}`}>{isGodMode ? 'SINGULARITY' : `Nexus v${APP_VERSION}`}</h3>
-              <p className="text-sm max-w-sm mx-auto mb-1">{currentModel.isThinking ? "Deep Reasoning Module Active." : "Multimodal Engine Ready."}</p>
+              <p className="text-sm max-w-sm mx-auto mb-1">{currentModel?.isThinking ? "Deep Reasoning Module Active." : "Multimodal Engine Ready."}</p>
               <p className="text-[10px] text-slate-600 font-mono mb-4 uppercase tracking-widest">Developed by {DEVELOPER_NAME}</p>
               <div className="grid grid-cols-2 gap-2 max-w-xs">
                  <button onClick={() => setInput("Analyze this image for me...")} className="p-2 text-xs bg-slate-900 border border-slate-800 rounded hover:border-nexus-500 transition-colors">/analyze image</button>
@@ -561,14 +576,14 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedPlanId, cu
               </div>
             ))
           )}
-          {isLoading && (<div className="flex gap-4 justify-start animate-pulse"><div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-1 ${isGodMode ? 'bg-amber-900' : 'bg-nexus-900'}`}><Loader2 className="w-5 h-5 text-white animate-spin" /></div><div className="glass-panel text-slate-400 rounded-2xl p-4 text-sm">{currentModel.isThinking ? "Critiquing logic..." : "Processing vectors..."}</div></div>)}
+          {isLoading && (<div className="flex gap-4 justify-start animate-pulse"><div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-1 ${isGodMode ? 'bg-amber-900' : 'bg-nexus-900'}`}><Loader2 className="w-5 h-5 text-white animate-spin" /></div><div className="glass-panel text-slate-400 rounded-2xl p-4 text-sm">{currentModel?.isThinking ? "Critiquing logic..." : "Processing vectors..."}</div></div>)}
           <div ref={messagesEndRef} />
         </div>
         <div className="p-4 border-t border-slate-800 bg-slate-950/80 backdrop-blur-md">
            {attachment && (<div className="absolute bottom-full left-4 mb-2 p-2 bg-slate-900 border border-slate-700 rounded-lg flex items-center gap-2"><div className="w-10 h-10 bg-slate-800 rounded flex items-center justify-center overflow-hidden"><img src={`data:${attachment.mimeType};base64,${attachment.data}`} className="w-full h-full object-cover" /></div><span className="text-xs text-slate-300 truncate max-w-[100px]">Attached Image</span><button onClick={() => setAttachment(null)} className="p-1 hover:bg-slate-700 rounded-full"><X className="w-3 h-3" /></button></div>)}
           <div className="max-w-4xl mx-auto relative flex gap-2">
              <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileSelect} />
-             <button onClick={() => fileInputRef.current?.click()} className={`p-3 text-slate-400 hover:text-white bg-slate-900 border border-slate-700 rounded-xl hover:border-nexus-500 transition-colors ${currentPlan.imageLimit !== 'unlimited' && totalImageCount >= (currentPlan.imageLimit as number) ? 'opacity-50 cursor-not-allowed' : ''}`} disabled={!currentModel.supportsVision || (currentPlan.imageLimit !== 'unlimited' && totalImageCount >= (currentPlan.imageLimit as number))}><Paperclip className="w-5 h-5" /></button>
+             <button onClick={() => fileInputRef.current?.click()} className={`p-3 text-slate-400 hover:text-white bg-slate-900 border border-slate-700 rounded-xl hover:border-nexus-500 transition-colors ${currentPlan.imageLimit !== 'unlimited' && totalImageCount >= (currentPlan.imageLimit as number) ? 'opacity-50 cursor-not-allowed' : ''}`} disabled={!currentModel?.supportsVision || (currentPlan.imageLimit !== 'unlimited' && totalImageCount >= (currentPlan.imageLimit as number))}><Paperclip className="w-5 h-5" /></button>
              <button onClick={toggleVoiceRecording} className={`p-3 text-slate-400 hover:text-white bg-slate-900 border border-slate-700 rounded-xl transition-all ${isRecording ? 'border-red-500 text-red-500 animate-pulse' : 'hover:border-nexus-500'}`}><Mic className="w-5 h-5" /></button>
             <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyPress} placeholder={isGodMode ? "Enter command..." : "Message Nexus v2.5..."} className={`flex-1 bg-slate-900 border border-slate-700 rounded-xl pl-4 pr-12 py-3 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:border-transparent resize-none max-h-32 min-h-[50px] ${isGodMode ? 'focus:ring-amber-500' : 'focus:ring-nexus-500'}`} rows={1} />
             <button onClick={handleSend} disabled={(!input.trim() && !attachment) || isLoading} className={`p-3 rounded-xl text-white shadow-lg transition-all ${isGodMode ? 'bg-amber-600 hover:bg-amber-500' : 'bg-nexus-600 hover:bg-nexus-500'}`}><Send className="w-5 h-5" /></button>
