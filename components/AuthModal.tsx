@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { X, Mail, Lock, User, ArrowRight, Loader2, Globe, Cloud, CloudOff } from 'lucide-react';
-import { GoogleCloudSync } from '../services/GoogleCloudSync';
+import { NetlifyService } from '../services/NetlifyService';
 import { UserProfile } from '../types';
 
 interface AuthModalProps {
@@ -16,7 +16,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, onLoginSuccess })
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const isCloudActive = GoogleCloudSync.isCloudActive();
+  const isCloudActive = NetlifyService.isCloudActive();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,9 +26,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, onLoginSuccess })
     try {
       let user;
       if (isLogin) {
-        user = await GoogleCloudSync.login(email, password);
+        user = await NetlifyService.login(email, password);
       } else {
-        user = await GoogleCloudSync.signup(email, password, name);
+        user = await NetlifyService.signup(email, password, name);
       }
       onLoginSuccess(user);
       onClose();
@@ -59,14 +59,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, onLoginSuccess })
           <div className="flex items-center justify-center gap-2 text-sm">
              <span className="text-slate-400">Status:</span>
              {isCloudActive ? (
-                <span className="text-emerald-400 flex items-center gap-1 font-mono text-xs"><div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"/> ONLINE (Google Cloud)</span>
+                <span className="text-emerald-400 flex items-center gap-1 font-mono text-xs"><div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"/> ONLINE (Netlify DB)</span>
              ) : (
                 <span className="text-orange-400 flex items-center gap-1 font-mono text-xs">LOCAL SIMULATION</span>
              )}
           </div>
           {!isCloudActive && (
              <p className="text-[10px] text-slate-500 mt-2 max-w-[250px] mx-auto">
-               Config missing. Data will not sync across devices. Edit constants.ts to enable Cloud.
+               Database URL missing. Data will not sync. Check Netlify Environment Variables.
              </p>
           )}
         </div>

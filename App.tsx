@@ -9,7 +9,7 @@ import { CreditModal } from './components/CreditModal';
 import { AuthModal } from './components/AuthModal';
 import { SUBSCRIPTION_PLANS, APP_VERSION } from './constants';
 import { View, CustomPlanConfig, UserProfile, UserAnalytics, ChatSession } from './types';
-import { GoogleCloudSync } from './services/GoogleCloudSync';
+import { NetlifyService } from './services/NetlifyService';
 import { Sparkles, Zap, ShieldCheck, Crown, Cpu, Box, Star, Globe, Infinity as InfinityIcon, Activity, Key, X, CheckCircle } from 'lucide-react';
 
 const REDEEM_CODES: Record<string, string> = {
@@ -83,7 +83,7 @@ export const App: React.FC = () => {
   // Sync Data when User Changes
   useEffect(() => {
     if (user) {
-      GoogleCloudSync.syncUserData(user.id).then(data => {
+      NetlifyService.syncUserData(user.id).then(data => {
         setAnalytics(data.analytics);
         setCredits(data.credits);
         setSelectedPlan(data.planId);
@@ -112,7 +112,7 @@ export const App: React.FC = () => {
 
        // Sync to cloud if logged in
        if (user) {
-           GoogleCloudSync.saveUserData(user.id, {
+           NetlifyService.saveUserData(user.id, {
                analytics: newStats,
                sessions: [], // Sessions handled by ChatInterface directly now
                credits,
@@ -178,7 +178,7 @@ export const App: React.FC = () => {
       setSelectedPlan(planId); 
       // Sync plan to user profile
       if (user) {
-         GoogleCloudSync.saveUserData(user.id, { analytics, sessions: [], credits, planId });
+         NetlifyService.saveUserData(user.id, { analytics, sessions: [], credits, planId });
       }
       setCurrentView('chat');
       setIsRedeemOpen(false); setRedeemInput('');

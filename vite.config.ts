@@ -6,8 +6,9 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     define: {
-      // Safely expose the API_KEY from the build environment to the client
-      'process.env.API_KEY': JSON.stringify(env.API_KEY)
+      // Safely expose the API_KEY and DB URL from the build environment to the client
+      'process.env.API_KEY': JSON.stringify(env.API_KEY),
+      'process.env.NETLIFY_DATABASE_URL': JSON.stringify(env.NETLIFY_DATABASE_URL)
     },
     build: {
       outDir: 'dist',

@@ -3,7 +3,7 @@ import { Send, Bot, User, Sparkles, Loader2, Plus, MessageSquare, ChevronDown, T
 import { GoogleGenAI, Chat, GenerateContentResponse } from "@google/genai";
 import { AI_MODELS, SUBSCRIPTION_PLANS, DEVELOPER_NAME, APP_VERSION } from '../constants';
 import { ChatSession, Message, ChatInterfaceProps, AIModel, Attachment, Tone } from '../types';
-import { GoogleCloudSync } from '../services/GoogleCloudSync';
+import { NetlifyService } from '../services/NetlifyService';
 
 const MessageRenderer: React.FC<{ text: string }> = ({ text }) => {
   const parts = text.split(/(```[\s\S]*?```|\*\*.*?\*\*|`.*?`)/g);
@@ -130,7 +130,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedPlanId, cu
     if (user) {
         // Debounce or save immediately. For simplicity: Immediate save via async background.
         // We do NOT await this to avoid blocking UI.
-        GoogleCloudSync.saveUserSessions(user.id, sessions);
+        NetlifyService.saveUserSessions(user.id, sessions);
     } else {
         localStorage.setItem('nexus_v2_sessions', JSON.stringify(sessions));
     }

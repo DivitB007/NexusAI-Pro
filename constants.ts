@@ -3,16 +3,13 @@ import { Plan, AIModel } from './types';
 export const APP_VERSION = "2.0.0-FINAL";
 export const DEVELOPER_NAME = "Divit Bansal";
 
-// --- GOOGLE CLOUD / FIREBASE CONFIGURATION ---
-// To enable cross-device storage, create a project at console.firebase.google.com
-// and paste your web app configuration here.
 export const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyDw8Btwqn2iQDdiil1bD4_xLqpChjehZ1E",
-  authDomain: "nexus-ai-pro-9b1a7.firebaseapp.com",
-  projectId: "nexus-ai-pro-9b1a7",
-  storageBucket: "nexus-ai-pro-9b1a7.firebasestorage.app",
-  messagingSenderId: "163518560714",
-  appId: "1:163518560714:web:d063c70bf1ce7582813733"
+  apiKey: "YOUR_API_KEY_HERE",
+  authDomain: "nexus-ai.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "nexus-ai.appspot.com",
+  messagingSenderId: "00000000000",
+  appId: "1:00000000000:web:00000000000000"
 };
 
 export const AI_MODELS: AIModel[] = [
